@@ -44,7 +44,7 @@ function HomePage() {
           className="mt-6 flex min-h-[52px] items-center justify-center gap-2 rounded-2xl bg-primary text-base font-semibold text-primary-foreground active:opacity-90"
         >
           <PenLine className="size-5" strokeWidth={1.75} />
-          오늘 기록하기
+          ＋ 오늘 읽은 책 기록하기
         </Link>
       </section>
 

@@ -29,6 +29,13 @@ export const Route = createFileRoute("/record")({
 
 const fieldClass =
   "w-full rounded-2xl border border-input bg-card px-4 py-3 text-base text-foreground outline-none placeholder:text-muted-foreground focus:border-ring";
+type FieldErrors = {
+  book?: string;
+  date?: string;
+  startPage?: string;
+  endPage?: string;
+};
+
 const labelClass = "mb-2 block text-sm font-semibold text-secondary-foreground";
 
 function RecordPage() {
@@ -43,7 +50,7 @@ function RecordPage() {
   const [quote, setQuote] = useState("");
   const [thought, setThought] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<FieldErrors>({});
   const [showNewBook, setShowNewBook] = useState(false);
 
   const saveMutation = useMutation({
@@ -71,7 +78,7 @@ function RecordPage() {
   const selectedBook = books.data?.find((b) => b.id === bookId);
 
   function validate() {
-    const next: Record<string, string> = {};
+    const next: FieldErrors = {};
     if (!bookId) next.book = "책을 선택해 주세요.";
     if (!readDate) next.date = "날짜를 선택해 주세요.";
     const s = Number(startPage);

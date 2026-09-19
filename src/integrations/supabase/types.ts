@@ -14,7 +14,92 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      books: {
+        Row: {
+          author: string | null
+          completed: boolean
+          cover_image: string | null
+          created_at: string
+          current_page: number
+          genre: string | null
+          id: string
+          title: string
+          total_pages: number
+          updated_at: string
+        }
+        Insert: {
+          author?: string | null
+          completed?: boolean
+          cover_image?: string | null
+          created_at?: string
+          current_page?: number
+          genre?: string | null
+          id?: string
+          title: string
+          total_pages?: number
+          updated_at?: string
+        }
+        Update: {
+          author?: string | null
+          completed?: boolean
+          cover_image?: string | null
+          created_at?: string
+          current_page?: number
+          genre?: string | null
+          id?: string
+          title?: string
+          total_pages?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      reading_logs: {
+        Row: {
+          book_id: string
+          created_at: string
+          end_page: number
+          id: string
+          page_image_url: string | null
+          pages_read: number | null
+          quote: string | null
+          read_date: string
+          start_page: number
+          thought: string | null
+        }
+        Insert: {
+          book_id: string
+          created_at?: string
+          end_page: number
+          id?: string
+          page_image_url?: string | null
+          pages_read?: number | null
+          quote?: string | null
+          read_date?: string
+          start_page: number
+          thought?: string | null
+        }
+        Update: {
+          book_id?: string
+          created_at?: string
+          end_page?: number
+          id?: string
+          page_image_url?: string | null
+          pages_read?: number | null
+          quote?: string | null
+          read_date?: string
+          start_page?: number
+          thought?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reading_logs_book_id_fkey"
+            columns: ["book_id"]
+            isOneToOne: false
+            referencedRelation: "books"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

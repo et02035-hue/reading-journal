@@ -58,5 +58,5 @@ export function progressOf(book: Pick<Book, "current_page" | "total_pages">): nu
 
 /** 읽은 쪽수 (DB에서도 동일 규칙으로 자동 계산된다) */
 export function pagesReadOf(startPage: number, endPage: number): number {
-  return endPage - startPage + 1;
+  return Math.max(0, endPage - startPage + 1);
 }

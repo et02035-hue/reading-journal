@@ -70,7 +70,7 @@ function RecordPage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries();
       toast.success("오늘의 기록을 저장했어요.");
-      navigate({ to: "/logs" });
+      navigate({ to: "/" });
     },
     onError: (error: Error) => toast.error(error.message),
   });

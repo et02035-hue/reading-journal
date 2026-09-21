@@ -6,7 +6,7 @@
  */
 
 /** 실제 Notion 데이터 소스 ID (「읽는 하루 — 독서 기록」) */
-export const NOTION_DATA_SOURCE_ID = "91ea4d8b-094b-8253-a568-07d37ba5382f";
+export const NOTION_DATA_SOURCE_ID = "2d09a3ce-a236-47f4-847e-904ba03bb2cf";
 
 /** Notion DB의 속성 이름 (한국어 필드명) */
 export const NOTION_LOG_PROPERTIES = {

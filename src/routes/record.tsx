@@ -14,6 +14,7 @@ import {
   todayISO,
   uploadPagePhoto,
 } from "@/lib/reading/api";
+import type { NotionLogPayload } from "@/lib/reading/notion-mapping";
 import { syncLogToNotion } from "@/lib/reading/notion.functions";
 import { booksQuery } from "@/lib/reading/queries";
 
@@ -62,6 +63,8 @@ function RecordPage() {
   const [showNewBook, setShowNewBook] = useState(false);
 
   const syncNotion = useServerFn(syncLogToNotion);
+  const [pendingSync, setPendingSync] = useState<NotionLogPayload | null>(null);
+  const [syncError, setSyncError] = useState("");
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -80,35 +83,60 @@ function RecordPage() {
       const book = books.data?.find((b) => b.id === bookId);
       const photoUrl = path ? await getPhotoUrl(path) : null;
       const total = book?.total_pages ?? 0;
-      const notion = await syncNotion({
-        data: {
-          bookTitle: book?.title ?? "",
-          author: book?.author ?? null,
-          genre: book?.genre ?? null,
-          readDate,
-          startPage: log.start_page,
-          endPage: log.end_page,
-          pagesRead: log.pages_read,
-          totalPages: total,
-          currentPage: Math.max(book?.current_page ?? 0, log.end_page),
-          completed: total > 0 && Math.max(book?.current_page ?? 0, log.end_page) >= total,
-          quote: log.quote,
-          thought: log.thought,
-          photoUrl,
-        },
-      }).catch(() => ({ synced: false, error: "Notion 동기화에 실패했어요." }));
+      const current = Math.max(book?.current_page ?? 0, log.end_page);
+      const payload: NotionLogPayload = {
+        bookTitle: book?.title ?? "",
+        author: book?.author ?? null,
+        genre: book?.genre ?? null,
+        readDate,
+        startPage: log.start_page,
+        endPage: log.end_page,
+        pagesRead: log.pages_read,
+        totalPages: total,
+        currentPage: current,
+        completed: total > 0 && current >= total,
+        quote: log.quote,
+        thought: log.thought,
+        photoUrl,
+      };
+      const notion = await syncNotion({ data: payload }).catch(() => ({
+        synced: false,
+        error: "Notion 동기화에 실패했어요.",
+      }));
 
-      return notion;
+      return { notion, payload };
     },
-    onSuccess: async (notion) => {
+    onSuccess: async ({ notion, payload }) => {
       await queryClient.invalidateQueries();
       toast.success("오늘의 기록을 저장했어요.");
-      if (!notion.synced) {
-        toast.error(`${notion.error ?? "Notion 동기화에 실패했어요."} 기록은 앱에 저장됐어요.`);
+      if (notion.synced) {
+        setPendingSync(null);
+        setSyncError("");
+        navigate({ to: "/" });
+        return;
       }
-      navigate({ to: "/" });
+      setPendingSync(payload);
+      setSyncError(notion.error ?? "Notion 동기화에 실패했어요.");
     },
     onError: (error: Error) => toast.error(error.message),
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: async () => {
+      if (!pendingSync) throw new Error("다시 보낼 기록이 없어요.");
+      return syncNotion({ data: pendingSync });
+    },
+    onSuccess: (notion) => {
+      if (notion.synced) {
+        setPendingSync(null);
+        setSyncError("");
+        toast.success("Notion에 기록을 보냈어요.");
+        navigate({ to: "/" });
+      } else {
+        setSyncError(notion.error ?? "Notion 동기화에 실패했어요.");
+      }
+    },
+    onError: () => setSyncError("Notion에 연결하지 못했어요."),
   });
 
   const selectedBook = books.data?.find((b) => b.id === bookId);

@@ -1,12 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { Loader2, Plus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { AppShell } from "@/components/AppShell";
 import { PhotoPicker } from "@/components/PhotoPicker";
-import { createBook, createLog, todayISO, uploadPagePhoto } from "@/lib/reading/api";
+import {
+  createBook,
+  createLog,
+  getPhotoUrl,
+  todayISO,
+  uploadPagePhoto,
+} from "@/lib/reading/api";
+import { syncLogToNotion } from "@/lib/reading/notion.functions";
 import { booksQuery } from "@/lib/reading/queries";
 
 export const Route = createFileRoute("/record")({
@@ -53,11 +61,13 @@ function RecordPage() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [showNewBook, setShowNewBook] = useState(false);
 
+  const syncNotion = useServerFn(syncLogToNotion);
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       let path: string | null = null;
       if (photo) path = await uploadPagePhoto(photo);
-      return createLog({
+      const log = await createLog({
         book_id: bookId,
         read_date: readDate,
         start_page: Number(startPage),
@@ -66,10 +76,36 @@ function RecordPage() {
         thought,
         page_image_url: path,
       });
+
+      const book = books.data?.find((b) => b.id === bookId);
+      const photoUrl = path ? await getPhotoUrl(path) : null;
+      const total = book?.total_pages ?? 0;
+      const notion = await syncNotion({
+        data: {
+          bookTitle: book?.title ?? "",
+          author: book?.author ?? null,
+          genre: book?.genre ?? null,
+          readDate,
+          startPage: log.start_page,
+          endPage: log.end_page,
+          pagesRead: log.pages_read,
+          totalPages: total,
+          currentPage: Math.max(book?.current_page ?? 0, log.end_page),
+          completed: total > 0 && Math.max(book?.current_page ?? 0, log.end_page) >= total,
+          quote: log.quote,
+          thought: log.thought,
+          photoUrl,
+        },
+      }).catch(() => ({ synced: false, error: "Notion 동기화에 실패했어요." }));
+
+      return notion;
     },
-    onSuccess: async () => {
+    onSuccess: async (notion) => {
       await queryClient.invalidateQueries();
       toast.success("오늘의 기록을 저장했어요.");
+      if (!notion.synced) {
+        toast.error(`${notion.error ?? "Notion 동기화에 실패했어요."} 기록은 앱에 저장됐어요.`);
+      }
       navigate({ to: "/" });
     },
     onError: (error: Error) => toast.error(error.message),

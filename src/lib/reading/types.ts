@@ -11,6 +11,9 @@ export type Book = {
   current_page: number;
   genre: string | null;
   cover_image: string | null;
+  publisher: string | null;
+  isbn13: string | null;
+  yes24_url: string | null;
   completed: boolean;
   created_at: string;
   updated_at: string;
@@ -38,6 +41,10 @@ export type NewBookInput = {
   author?: string;
   total_pages?: number;
   genre?: string;
+  cover_image?: string | null;
+  publisher?: string | null;
+  isbn13?: string | null;
+  yes24_url?: string | null;
 };
 
 export type NewReadingLogInput = {

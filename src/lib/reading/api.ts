@@ -39,6 +39,10 @@ export async function createBook(input: NewBookInput): Promise<Book> {
         author: input.author?.trim() || null,
         total_pages: input.total_pages && input.total_pages > 0 ? input.total_pages : 0,
         genre: input.genre?.trim() || null,
+        cover_image: input.cover_image || null,
+        publisher: input.publisher || null,
+        isbn13: input.isbn13 || null,
+        yes24_url: input.yes24_url || null,
       })
       .select("*")
       .single(),

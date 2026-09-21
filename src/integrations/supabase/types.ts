@@ -23,9 +23,12 @@ export type Database = {
           current_page: number
           genre: string | null
           id: string
+          isbn13: string | null
+          publisher: string | null
           title: string
           total_pages: number
           updated_at: string
+          yes24_url: string | null
         }
         Insert: {
           author?: string | null
@@ -35,9 +38,12 @@ export type Database = {
           current_page?: number
           genre?: string | null
           id?: string
+          isbn13?: string | null
+          publisher?: string | null
           title: string
           total_pages?: number
           updated_at?: string
+          yes24_url?: string | null
         }
         Update: {
           author?: string | null
@@ -47,9 +53,12 @@ export type Database = {
           current_page?: number
           genre?: string | null
           id?: string
+          isbn13?: string | null
+          publisher?: string | null
           title?: string
           total_pages?: number
           updated_at?: string
+          yes24_url?: string | null
         }
         Relationships: []
       }

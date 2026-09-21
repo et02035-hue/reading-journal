@@ -12,7 +12,11 @@ import {
 
 const GATEWAY_URL = "https://connector-gateway.lovable.dev/notion/v1";
 
-export type NotionSyncResult = { synced: boolean; url?: string; error?: string };
+export type NotionSyncResult = {
+  synced: boolean;
+  url?: string | undefined;
+  error?: string | undefined;
+};
 
 export const syncLogToNotion = createServerFn({ method: "POST" })
   .inputValidator((data: NotionLogPayload) => data)

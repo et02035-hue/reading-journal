@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { Loader2, Plus } from "lucide-react";
+import { Loader as Loader2, Plus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -99,6 +99,7 @@ function RecordPage() {
         thought: log.thought,
         photoUrl,
       };
+
       const notion = await syncNotion({ data: payload }).catch(() => ({
         synced: false,
         error: "Notion 동기화에 실패했어요.",
@@ -109,14 +110,18 @@ function RecordPage() {
     onSuccess: async ({ notion, payload }) => {
       await queryClient.invalidateQueries();
       toast.success("오늘의 기록을 저장했어요.");
-      if (notion.synced) {
+
+      if (!notion.synced) {
+        setPendingSync(payload);
+        setSyncError(notion.error ?? "Notion 동기화에 실패했어요.");
+        toast.error("기록은 저장됐어요. Notion 동기화는 나중에 다시 시도할 수 있어요.");
+      } else {
         setPendingSync(null);
         setSyncError("");
-        navigate({ to: "/" });
-        return;
+        toast.success("Notion에도 기록했어요.");
       }
-      setPendingSync(payload);
-      setSyncError(notion.error ?? "Notion 동기화에 실패했어요.");
+
+      navigate({ to: "/" });
     },
     onError: (error: Error) => toast.error(error.message),
   });

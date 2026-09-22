@@ -30,10 +30,10 @@ type Yes24ApiResponse = {
   } | null;
 };
 
-/** YES24 저자 표기("홍길동 저" / "홍길동 지음")에서 접미어를 걷어낸다. */
+/** YES24 저자 표기("홍길동 저/번역자 역")에서 번역자를 걷어내고 이름만 남긴다. */
 function cleanAuthor(raw?: string): string {
-  const trimmed = raw?.trim() ?? "";
-  return trimmed.replace(/\s+(저|지음|역|옮긴이)$/, "").trim();
+  const first = raw?.split("/")[0]?.trim() ?? "";
+  return first.replace(/\s+(저|지음|역|옮긴이)$/, "").trim();
 }
 
 export const searchYes24Books = createServerFn({ method: "GET" })

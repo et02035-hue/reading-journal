@@ -6,6 +6,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AppShell } from "@/components/AppShell";
+import { BookSearch, type SelectedYes24Book } from "@/components/BookSearch";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import {
   createBook,
@@ -345,7 +346,24 @@ function NewBookForm({ onCreated }: { onCreated: (book: { id: string }) => void 
   const [author, setAuthor] = useState("");
   const [totalPages, setTotalPages] = useState("");
   const [genre, setGenre] = useState("");
+  const [coverImage, setCoverImage] = useState("");
+  const [publisher, setPublisher] = useState("");
+  const [isbn13, setIsbn13] = useState("");
+  const [yes24Url, setYes24Url] = useState("");
   const [error, setError] = useState("");
+  const [mode, setMode] = useState<"search" | "manual">("search");
+
+  function applyYes24Book(book: SelectedYes24Book) {
+    setTitle(book.title);
+    setAuthor(book.author);
+    setTotalPages(book.totalPages > 0 ? String(book.totalPages) : "");
+    setGenre(book.genre);
+    setCoverImage(book.coverUrl);
+    setPublisher(book.publisher);
+    setIsbn13(book.isbn13);
+    setYes24Url(book.yes24Url);
+    setMode("manual");
+  }
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -354,6 +372,10 @@ function NewBookForm({ onCreated }: { onCreated: (book: { id: string }) => void 
         author,
         total_pages: totalPages ? Number(totalPages) : 0,
         genre,
+        cover_image: coverImage || null,
+        publisher: publisher || null,
+        isbn13: isbn13 || null,
+        yes24_url: yes24Url || null,
       }),
     onSuccess: async (book) => {
       await queryClient.invalidateQueries({ queryKey: ["books"] });
@@ -365,51 +387,95 @@ function NewBookForm({ onCreated }: { onCreated: (book: { id: string }) => void 
 
   return (
     <div className="card-soft mt-4 space-y-3 p-4">
-      <input
-        className={fieldClass}
-        placeholder="책 제목 (필수)"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-      />
-      <input
-        className={fieldClass}
-        placeholder="저자"
-        value={author}
-        onChange={(e) => setAuthor(e.target.value)}
-      />
-      <div className="grid grid-cols-2 gap-3">
-        <input
-          className={fieldClass}
-          type="number"
-          inputMode="numeric"
-          min={1}
-          placeholder="전체 페이지"
-          value={totalPages}
-          onChange={(e) => setTotalPages(e.target.value)}
-        />
-        <input
-          className={fieldClass}
-          placeholder="장르"
-          value={genre}
-          onChange={(e) => setGenre(e.target.value)}
-        />
-      </div>
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      <button
-        type="button"
-        disabled={mutation.isPending}
-        onClick={() => {
-          if (!title.trim()) {
-            setError("책 제목을 입력해 주세요.");
-            return;
-          }
-          setError("");
-          mutation.mutate();
-        }}
-        className="min-h-[48px] w-full rounded-2xl bg-secondary text-sm font-semibold text-secondary-foreground disabled:opacity-60"
-      >
-        책 추가하기
-      </button>
+      {mode === "search" ? (
+        <>
+          <BookSearch
+            onSelect={applyYes24Book}
+            onManualFallback={() => setMode("manual")}
+          />
+          <button
+            type="button"
+            onClick={() => setMode("manual")}
+            className="text-sm font-medium text-primary"
+          >
+            검색하지 않고 직접 입력하기
+          </button>
+        </>
+      ) : (
+        <>
+          {yes24Url ? (
+            <p className="rounded-2xl bg-accent px-4 py-2 text-xs text-accent-foreground">
+              도서 정보 제공:{" "}
+              <a
+                href={yes24Url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-primary underline"
+              >
+                YES24
+              </a>
+            </p>
+          ) : null}
+          <input
+            className={fieldClass}
+            placeholder="책 제목 (필수)"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <input
+            className={fieldClass}
+            placeholder="저자"
+            value={author}
+            onChange={(e) => setAuthor(e.target.value)}
+          />
+          <input
+            className={fieldClass}
+            placeholder="출판사"
+            value={publisher}
+            onChange={(e) => setPublisher(e.target.value)}
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              className={fieldClass}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              placeholder="전체 페이지"
+              value={totalPages}
+              onChange={(e) => setTotalPages(e.target.value)}
+            />
+            <input
+              className={fieldClass}
+              placeholder="장르"
+              value={genre}
+              onChange={(e) => setGenre(e.target.value)}
+            />
+          </div>
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <button
+            type="button"
+            disabled={mutation.isPending}
+            onClick={() => {
+              if (!title.trim()) {
+                setError("책 제목을 입력해 주세요.");
+                return;
+              }
+              setError("");
+              mutation.mutate();
+            }}
+            className="min-h-[48px] w-full rounded-2xl bg-secondary text-sm font-semibold text-secondary-foreground disabled:opacity-60"
+          >
+            책 추가하기
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("search")}
+            className="w-full text-center text-sm font-medium text-primary"
+          >
+            YES24에서 다시 검색하기
+          </button>
+        </>
+      )}
     </div>
   );
 }

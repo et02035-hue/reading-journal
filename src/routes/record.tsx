@@ -115,13 +115,13 @@ function RecordPage() {
       if (!notion.synced) {
         setPendingSync(payload);
         setSyncError(notion.error ?? "Notion 동기화에 실패했어요.");
-        toast.error("기록은 저장됐어요. Notion 동기화는 나중에 다시 시도할 수 있어요.");
-      } else {
-        setPendingSync(null);
-        setSyncError("");
-        toast.success("Notion에도 기록했어요.");
+        toast.error("기록은 저장됐어요. Notion 동기화를 다시 시도할 수 있어요.");
+        return;
       }
 
+      setPendingSync(null);
+      setSyncError("");
+      toast.success("Notion에도 기록했어요.");
       navigate({ to: "/" });
     },
     onError: (error: Error) => toast.error(error.message),
@@ -327,9 +327,40 @@ function RecordPage() {
           />
         </section>
 
+        {pendingSync ? (
+          <div className="card-soft space-y-3 px-5 py-4">
+            <p className="text-sm font-semibold text-foreground">
+              기록은 저장했어요. Notion에는 아직 못 보냈어요.
+            </p>
+            {syncError ? <p className="text-xs text-destructive">{syncError}</p> : null}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => retryMutation.mutate()}
+                disabled={retryMutation.isPending}
+                className="flex min-h-[48px] flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+              >
+                {retryMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+                Notion에 다시 보내기
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingSync(null);
+                  setSyncError("");
+                  navigate({ to: "/" });
+                }}
+                className="min-h-[48px] rounded-2xl border border-input bg-background px-4 text-sm font-medium text-muted-foreground"
+              >
+                다음에 하기
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <button
           type="submit"
-          disabled={saveMutation.isPending}
+          disabled={saveMutation.isPending || Boolean(pendingSync)}
           className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-primary text-base font-semibold text-primary-foreground disabled:opacity-60"
         >
           {saveMutation.isPending ? <Loader2 className="size-5 animate-spin" /> : null}

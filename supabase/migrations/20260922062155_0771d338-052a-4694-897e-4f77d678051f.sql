@@ -1,0 +1,1 @@
+ALTER TABLE public.books ADD COLUMN IF NOT EXISTS publisher text; ALTER TABLE public.books ADD COLUMN IF NOT EXISTS isbn13 text; ALTER TABLE public.books ADD COLUMN IF NOT EXISTS yes24_url text;

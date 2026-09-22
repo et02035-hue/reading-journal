@@ -10,25 +10,31 @@ import type { Yes24Book, Yes24SearchRequest, Yes24SearchResult } from "./yes24.t
 const YES24_API_BASE = "https://apis.yes24.com/v1/goods/itemList";
 
 type Yes24ApiItem = {
-  goodsId?: string;
-  goodsName?: string;
-  authorName?: string;
-  publisherName?: string;
-  publisherUrl?: string;
-  goodsPageCount?: number;
-  goodsIsbn13?: string;
-  goodsImageUrl?: string;
-  goodsDetailUrl?: string;
-  categoryPath?: string;
+  itemId?: number | string;
+  title?: string;
+  author?: string;
+  publisher?: string;
+  goodsSortNm?: string;
+  pages?: number | null;
+  isbn13?: string;
+  cover?: string;
+  link?: string;
 };
 
 type Yes24ApiResponse = {
-  code?: number;
+  success?: boolean;
   message?: string;
+  errorCode?: string | null;
   data?: {
-    itemList?: Yes24ApiItem[];
-  };
+    items?: Yes24ApiItem[];
+  } | null;
 };
+
+/** YES24 저자 표기("홍길동 저" / "홍길동 지음")에서 접미어를 걷어낸다. */
+function cleanAuthor(raw?: string): string {
+  const trimmed = raw?.trim() ?? "";
+  return trimmed.replace(/\s+(저|지음|역|옮긴이)$/, "").trim();
+}
 
 export const searchYes24Books = createServerFn({ method: "GET" })
   .inputValidator((data: Yes24SearchRequest) => {
@@ -71,28 +77,27 @@ export const searchYes24Books = createServerFn({ method: "GET" })
         };
       }
 
-      const json = (await response.json()) as Yes24ApiResponse;
+    const json = (await response.json()) as Yes24ApiResponse;
 
-      if (json.code && json.code !== 200 && json.code !== 0) {
-        return {
-          books: [],
-          error: json.message ?? "YES24 API에서 오류를 반환했습니다.",
-        };
-      }
+    if (json.success === false) {
+      return {
+        books: [],
+        error: json.message ?? "YES24 API에서 오류를 반환했습니다.",
+      };
+    }
 
-      const items = json.data?.itemList ?? [];
-      const books: Yes24Book[] = items.map((item) => ({
-        goodsId: String(item.goodsId ?? ""),
-        title: item.goodsName ?? "제목 없음",
-        author: item.authorName ?? "",
-        publisher: item.publisherName ?? "",
-        publisherUrl: item.publisherUrl,
-        coverUrl: item.goodsImageUrl,
-        totalPages: item.goodsPageCount ?? 0,
-        isbn13: item.goodsIsbn13,
-        yes24Url: item.goodsDetailUrl ?? "",
-        category: item.categoryPath,
-      }));
+    const items = json.data?.items ?? [];
+    const books: Yes24Book[] = items.map((item) => ({
+      goodsId: String(item.itemId ?? ""),
+      title: item.title?.trim() || "제목 없음",
+      author: cleanAuthor(item.author),
+      publisher: item.publisher?.trim() ?? "",
+      coverUrl: item.cover,
+      totalPages: item.pages ?? 0,
+      isbn13: item.isbn13,
+      yes24Url: item.link ?? "",
+      category: item.goodsSortNm,
+    }));
 
       return { books };
     } catch (error) {

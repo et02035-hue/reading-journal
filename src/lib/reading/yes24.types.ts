@@ -9,12 +9,12 @@ export type Yes24Book = {
   title: string;
   author: string;
   publisher: string;
-  publisherUrl?: string;
-  coverUrl?: string;
+  publisherUrl?: string | undefined;
+  coverUrl?: string | undefined;
   totalPages: number;
-  isbn13?: string;
+  isbn13?: string | undefined;
   yes24Url: string;
-  category?: string;
+  category?: string | undefined;
 };
 
 /** 서버 함수가 반환하는 검색 결과 */

@@ -16,7 +16,7 @@ import {
   uploadPagePhoto,
 } from "@/lib/reading/api";
 import type { NotionLogPayload } from "@/lib/reading/notion-mapping";
-import { syncLogToNotion } from "@/lib/reading/notion.functions";
+import { syncLogToNotion, type SyncLogInput } from "@/lib/reading/notion.functions";
 import { booksQuery } from "@/lib/reading/queries";
 
 export const Route = createFileRoute("/record")({

@@ -29,8 +29,10 @@ export type ReadingLog = {
   quote: string | null;
   thought: string | null;
   page_image_url: string | null;
+  notion_page_id: string | null;
   created_at: string;
 };
+
 
 export type ReadingLogWithBook = ReadingLog & {
   book: Pick<Book, "id" | "title" | "author"> | null;

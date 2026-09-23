@@ -91,11 +91,94 @@ export function toNotionLogProperties(log: NotionLogPayload) {
     [p.genre]: { multi_select: genreOption ? [{ name: genreOption }] : [] },
   };
 
-  properties[p.pageImage] = {
-    files: log.photoUrl
-      ? [{ name: "페이지 사진", type: "external", external: { url: log.photoUrl } }]
-      : [],
-  };
+  // 사진이 없을 때는 Notion의 기존 사진을 지우지 않도록 속성 자체를 생략한다.
+  if (log.photoUrl) {
+    properties[p.pageImage] = {
+      files: [{ name: "페이지 사진", type: "external", external: { url: log.photoUrl } }],
+    };
+  }
 
   return properties;
 }
+
+/* ------------------------------------------------------------------ *
+ * Notion → 앱 방향 파싱
+ * ------------------------------------------------------------------ */
+
+type NotionProperty = Record<string, unknown>;
+
+function plainText(prop: unknown): string {
+  const list = (prop as { rich_text?: { plain_text?: string }[] } | undefined)?.rich_text;
+  if (!Array.isArray(list)) return "";
+  return list.map((t) => t.plain_text ?? "").join("").trim();
+}
+
+function numberOf(prop: unknown): number | null {
+  const value = (prop as { number?: number | null } | undefined)?.number;
+  return typeof value === "number" ? value : null;
+}
+
+function dateOf(prop: unknown): string | null {
+  const start = (prop as { date?: { start?: string } | null } | undefined)?.date?.start;
+  return start ? start.slice(0, 10) : null;
+}
+
+function checkboxOf(prop: unknown): boolean | null {
+  const value = (prop as { checkbox?: boolean } | undefined)?.checkbox;
+  return typeof value === "boolean" ? value : null;
+}
+
+function multiSelectFirst(prop: unknown): string | null {
+  const list = (prop as { multi_select?: { name?: string }[] } | undefined)?.multi_select;
+  return Array.isArray(list) && list[0]?.name ? list[0].name : null;
+}
+
+/** Notion 페이지 1건을 앱 도메인 값으로 변환한 결과 */
+export type NotionLogRecord = {
+  pageId: string;
+  bookTitle: string;
+  author: string | null;
+  genre: string | null;
+  readDate: string;
+  startPage: number;
+  endPage: number;
+  totalPages: number | null;
+  completed: boolean | null;
+  quote: string | null;
+  thought: string | null;
+};
+
+export type NotionPage = { id: string; properties?: NotionProperty };
+
+/** 필수 값(날짜·책 이름·시작/끝 페이지)이 없으면 null을 돌려준다. */
+export function parseNotionLogPage(page: NotionPage): NotionLogRecord | null {
+  const p = NOTION_LOG_PROPERTIES;
+  const props = (page.properties ?? {}) as NotionProperty;
+
+  const readDate = dateOf(props[p.readDate]);
+  const bookTitle = plainText(props[p.bookName]);
+  const startPage = numberOf(props[p.startPage]);
+  const endPage = numberOf(props[p.endPage]);
+
+  if (!readDate || !bookTitle || startPage === null || endPage === null) return null;
+  if (endPage < startPage) return null;
+
+  const author = plainText(props[p.author]);
+  const quote = plainText(props[p.quote]);
+  const thought = plainText(props[p.thought]);
+
+  return {
+    pageId: page.id,
+    bookTitle,
+    author: author || null,
+    genre: multiSelectFirst(props[p.genre]),
+    readDate,
+    startPage,
+    endPage,
+    totalPages: numberOf(props[p.totalPages]),
+    completed: checkboxOf(props[p.completed]),
+    quote: quote || null,
+    thought: thought || null,
+  };
+}
+

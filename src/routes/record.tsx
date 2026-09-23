@@ -16,7 +16,7 @@ import {
   uploadPagePhoto,
 } from "@/lib/reading/api";
 import type { NotionLogPayload } from "@/lib/reading/notion-mapping";
-import { syncLogToNotion } from "@/lib/reading/notion.functions";
+import { syncLogToNotion, type SyncLogInput } from "@/lib/reading/notion.functions";
 import { booksQuery } from "@/lib/reading/queries";
 
 export const Route = createFileRoute("/record")({
@@ -64,7 +64,7 @@ function RecordPage() {
   const [showNewBook, setShowNewBook] = useState(false);
 
   const syncNotion = useServerFn(syncLogToNotion);
-  const [pendingSync, setPendingSync] = useState<NotionLogPayload | null>(null);
+  const [pendingSync, setPendingSync] = useState<SyncLogInput | null>(null);
   const [syncError, setSyncError] = useState("");
 
   const saveMutation = useMutation({
@@ -101,19 +101,26 @@ function RecordPage() {
         photoUrl,
       };
 
-      const notion = await syncNotion({ data: payload }).catch(() => ({
+      // 이미 Notion 페이지가 연결돼 있으면 새로 만들지 않고 갱신한다.
+      const input: SyncLogInput = {
+        logId: log.id,
+        notionPageId: log.notion_page_id ?? null,
+        payload,
+      };
+
+      const notion = await syncNotion({ data: input }).catch(() => ({
         synced: false,
         error: "Notion 동기화에 실패했어요.",
       }));
 
-      return { notion, payload };
+      return { notion, input };
     },
-    onSuccess: async ({ notion, payload }) => {
+    onSuccess: async ({ notion, input }) => {
       await queryClient.invalidateQueries();
       toast.success("오늘의 기록을 저장했어요.");
 
       if (!notion.synced) {
-        setPendingSync(payload);
+        setPendingSync(input);
         setSyncError(notion.error ?? "Notion 동기화에 실패했어요.");
         toast.error("기록은 저장됐어요. Notion 동기화를 다시 시도할 수 있어요.");
         return;
@@ -144,6 +151,7 @@ function RecordPage() {
     },
     onError: () => setSyncError("Notion에 연결하지 못했어요."),
   });
+
 
   const selectedBook = books.data?.find((b) => b.id === bookId);
 

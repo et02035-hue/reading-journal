@@ -4,54 +4,48 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 
-import {
-  NOTION_DATA_SOURCE_ID,
-  toNotionLogProperties,
-  type NotionLogPayload,
-} from "./notion-mapping";
-
-const GATEWAY_URL = "https://connector-gateway.lovable.dev/notion/v1";
+import type { NotionLogPayload } from "./notion-mapping";
 
 export type NotionSyncResult = {
   synced: boolean;
+  pageId?: string | undefined;
   url?: string | undefined;
   error?: string | undefined;
 };
 
+export type SyncLogInput = {
+  /** Supabase reading_logs.id (있으면 생성된 Notion page id를 저장한다) */
+  logId?: string | undefined;
+  /** 이미 연결된 Notion page id (있으면 새로 만들지 않고 갱신한다) */
+  notionPageId?: string | null | undefined;
+  payload: NotionLogPayload;
+};
+
 export const syncLogToNotion = createServerFn({ method: "POST" })
-  .inputValidator((data: NotionLogPayload) => data)
+  .inputValidator((data: SyncLogInput) => data)
   .handler(async ({ data }): Promise<NotionSyncResult> => {
-    const lovableKey = process.env["LOVABLE_API_KEY"];
-    const notionKey = process.env["NOTION_API_KEY"];
-    if (!lovableKey || !notionKey) {
-      return { synced: false, error: "Notion 연결이 설정되지 않았습니다." };
-    }
+    const { createNotionLogPage, updateNotionLogPage, saveNotionPageId } = await import(
+      "./notion.server"
+    );
 
     try {
-      const response = await fetch(`${GATEWAY_URL}/pages`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${lovableKey}`,
-          "X-Connection-Api-Key": notionKey,
-          "Notion-Version": "2025-09-03",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          parent: { type: "data_source_id", data_source_id: NOTION_DATA_SOURCE_ID },
-          properties: toNotionLogProperties(data),
-        }),
-      });
-
-      if (!response.ok) {
-        const body = await response.text();
-        console.error(`Notion page create failed [${response.status}]: ${body}`);
-        return { synced: false, error: `Notion 오류 (${response.status})` };
+      if (data.notionPageId) {
+        const page = await updateNotionLogPage(data.notionPageId, data.payload);
+        return { synced: true, pageId: data.notionPageId, url: page.url };
       }
 
-      const page = (await response.json()) as { url?: string };
-      return { synced: true, url: page.url };
+      const page = await createNotionLogPage(data.payload);
+      if (data.logId && page.id) await saveNotionPageId(data.logId, page.id);
+      return { synced: true, pageId: page.id, url: page.url };
     } catch (error) {
       console.error("Notion sync error", error);
-      return { synced: false, error: "Notion에 연결하지 못했습니다." };
+      const message =
+        error instanceof Error ? error.message : "Notion에 연결하지 못했습니다.";
+      return { synced: false, error: message };
     }
   });
+
+export const importLogsFromNotion = createServerFn({ method: "POST" }).handler(async () => {
+  const { importNotionLogs } = await import("./notion.server");
+  return importNotionLogs();
+});

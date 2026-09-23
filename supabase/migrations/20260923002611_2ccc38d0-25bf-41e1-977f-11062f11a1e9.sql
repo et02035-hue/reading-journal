@@ -1,0 +1,2 @@
+ALTER TABLE public.reading_logs ADD COLUMN IF NOT EXISTS notion_page_id text;
+CREATE UNIQUE INDEX IF NOT EXISTS reading_logs_notion_page_id_key ON public.reading_logs (notion_page_id) WHERE notion_page_id IS NOT NULL;

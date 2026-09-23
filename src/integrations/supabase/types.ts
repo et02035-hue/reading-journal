@@ -68,6 +68,7 @@ export type Database = {
           created_at: string
           end_page: number
           id: string
+          notion_page_id: string | null
           page_image_url: string | null
           pages_read: number | null
           quote: string | null
@@ -80,6 +81,7 @@ export type Database = {
           created_at?: string
           end_page: number
           id?: string
+          notion_page_id?: string | null
           page_image_url?: string | null
           pages_read?: number | null
           quote?: string | null
@@ -92,6 +94,7 @@ export type Database = {
           created_at?: string
           end_page?: number
           id?: string
+          notion_page_id?: string | null
           page_image_url?: string | null
           pages_read?: number | null
           quote?: string | null

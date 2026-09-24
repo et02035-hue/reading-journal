@@ -1,31 +1,41 @@
 /**
  * Notion 연동 서버 전용 레이어.
- * 게이트웨이 호출과 Supabase 쓰기는 모두 여기에서만 일어난다.
- * (이 파일은 클라이언트 번들에 포함되지 않는다.)
+ *
+ * Notion REST API를 직접 호출하며 Lovable Gateway/키에는 의존하지 않는다.
+ * 게이트웨이 호출과 Supabase 쓰기는 모두 이 파일에서 처리한다.
  */
+
 import { createClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
 
 import {
-  NOTION_DATA_SOURCE_ID,
+  NOTION_BOOK_DATA_SOURCE_ID,
+  NOTION_LOG_DATA_SOURCE_ID,
+  parseNotionBookPage,
   parseNotionLogPage,
+  toNotionBookProperties,
   toNotionLogProperties,
+  type NotionBookPayload,
+  type NotionBookRecord,
   type NotionLogPayload,
   type NotionLogRecord,
   type NotionPage,
 } from "./notion-mapping";
 import { bookMatchKey, logMatchKey } from "./sync-matching";
 
-const GATEWAY_URL = "https://connector-gateway.lovable.dev/notion/v1";
+const NOTION_API_URL = "https://api.notion.com/v1";
 
 function notionHeaders() {
-  const lovableKey = process.env["LOVABLE_API_KEY"];
-  const notionKey = process.env["NOTION_API_KEY"];
-  if (!lovableKey || !notionKey) return null;
+  const notionKey =
+    process.env["NOTION_API_KEY"] ||
+    process.env["NOTION_TOKEN"] ||
+    process.env["NOTION_INTEGRATION_TOKEN"];
+
+  if (!notionKey) return null;
+
   return {
-    Authorization: `Bearer ${lovableKey}`,
-    "X-Connection-Api-Key": notionKey,
+    Authorization: "Bearer " + notionKey,
     "Notion-Version": "2025-09-03",
     "Content-Type": "application/json",
   };
@@ -36,9 +46,11 @@ async function notionRequest<T>(
   init: { method: string; body?: unknown },
 ): Promise<T> {
   const headers = notionHeaders();
-  if (!headers) throw new Error("Notion 연결이 설정되지 않았습니다.");
+  if (!headers) {
+    throw new Error("Notion 연결 키가 설정되지 않았습니다.");
+  }
 
-  const response = await fetch(`${GATEWAY_URL}${path}`, {
+  const response = await fetch(NOTION_API_URL + path, {
     method: init.method,
     headers,
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
@@ -46,65 +58,234 @@ async function notionRequest<T>(
 
   if (!response.ok) {
     const body = await response.text();
-    console.error(`Notion ${init.method} ${path} failed [${response.status}]: ${body}`);
-    throw new Error(`Notion 오류 (${response.status})`);
+    console.error("Notion " + init.method + " " + path + " failed [" + response.status + "]: " + body);
+
+    let detail = "";
+    try {
+      const parsed = JSON.parse(body) as { message?: string };
+      detail = parsed.message ? ": " + parsed.message : "";
+    } catch {
+      // Notion이 JSON이 아닌 오류를 반환하면 상태 코드만 노출한다.
+    }
+
+    throw new Error("Notion 오류 (" + response.status + ")" + detail);
   }
 
   return (await response.json()) as T;
 }
 
-/** 새 Notion 페이지 생성 */
-export async function createNotionLogPage(payload: NotionLogPayload) {
-  return notionRequest<{ id: string; url?: string }>("/pages", {
-    method: "POST",
-    body: {
-      parent: { type: "data_source_id", data_source_id: NOTION_DATA_SOURCE_ID },
-      properties: toNotionLogProperties(payload),
-    },
-  });
-}
-
-/** 기존 Notion 페이지 갱신 */
-export async function updateNotionLogPage(pageId: string, payload: NotionLogPayload) {
-  return notionRequest<{ id: string; url?: string }>(`/pages/${pageId}`, {
-    method: "PATCH",
-    body: { properties: toNotionLogProperties(payload) },
-  });
-}
-
-/** 데이터 소스의 모든 기록 페이지를 읽어 앱 도메인 값으로 변환 */
-export async function listNotionLogRecords(): Promise<{
-  records: NotionLogRecord[];
-  skipped: number;
-}> {
-  const records: NotionLogRecord[] = [];
+async function queryDataSource(
+  dataSourceId: string,
+): Promise<{ results: NotionPage[]; skipped: number }> {
+  const results: NotionPage[] = [];
   let skipped = 0;
   let cursor: string | undefined;
 
   do {
     const page = await notionRequest<{
-      results: NotionPage[];
+      results?: NotionPage[];
       has_more?: boolean;
       next_cursor?: string | null;
-    }>(`/data_sources/${NOTION_DATA_SOURCE_ID}/query`, {
+    }>("/data_sources/" + dataSourceId + "/query", {
       method: "POST",
       body: cursor ? { start_cursor: cursor, page_size: 100 } : { page_size: 100 },
     });
 
-    for (const raw of page.results ?? []) {
-      const parsed = parseNotionLogPage(raw);
-      if (parsed) records.push(parsed);
+    for (const item of page.results ?? []) {
+      if (item?.id) results.push(item);
       else skipped += 1;
     }
 
     cursor = page.has_more && page.next_cursor ? page.next_cursor : undefined;
   } while (cursor);
 
+  return { results, skipped };
+}
+
+/* ------------------------------------------------------------------ *
+ * Notion 책 DB
+ * ------------------------------------------------------------------ */
+
+export async function listNotionBookRecords(): Promise<{
+  records: NotionBookRecord[];
+  skipped: number;
+}> {
+  const { results, skipped: initialSkipped } = await queryDataSource(
+    NOTION_BOOK_DATA_SOURCE_ID,
+  );
+
+  const records: NotionBookRecord[] = [];
+  let skipped = initialSkipped;
+
+  for (const raw of results) {
+    const parsed = parseNotionBookPage(raw);
+    if (parsed) records.push(parsed);
+    else skipped += 1;
+  }
+
+  return { records, skipped };
+}
+
+async function createNotionBookPage(payload: NotionBookPayload) {
+  return notionRequest<{ id: string; url?: string }>("/pages", {
+    method: "POST",
+    body: {
+      parent: { type: "data_source_id", data_source_id: NOTION_BOOK_DATA_SOURCE_ID },
+      properties: toNotionBookProperties(payload),
+    },
+  });
+}
+
+async function updateNotionBookPage(pageId: string, payload: NotionBookPayload) {
+  return notionRequest<{ id: string; url?: string }>("/pages/" + pageId, {
+    method: "PATCH",
+    body: { properties: toNotionBookProperties(payload) },
+  });
+}
+
+function bookPayloadFromLog(payload: NotionLogPayload): NotionBookPayload {
+  return {
+    title: payload.bookTitle,
+    author: payload.author ?? null,
+    publisher: payload.publisher ?? null,
+    isbn13: payload.isbn13 ?? null,
+    totalPages: payload.totalPages ?? null,
+    genre: payload.genre ?? null,
+    coverUrl: payload.coverUrl ?? null,
+    yes24Url: payload.yes24Url ?? null,
+  };
+}
+
+/**
+ * 같은 ISBN13 또는 제목+저자가 있는 기존 책을 재사용한다.
+ * 기존 책의 비어 있는 정보는 앱에서 알고 있는 값으로 보완한다.
+ */
+async function resolveNotionBook(payload: NotionLogPayload) {
+  const { records } = await listNotionBookRecords();
+  const normalizedIsbn = payload.isbn13?.trim() || "";
+
+  const existing =
+    (normalizedIsbn
+      ? records.find((book) => book.isbn13?.trim() === normalizedIsbn)
+      : undefined) ??
+    records.find(
+      (book) =>
+        bookMatchKey(book.title, book.author) ===
+        bookMatchKey(payload.bookTitle, payload.author),
+    ) ??
+    records.find(
+      (book) =>
+        bookMatchKey(book.title, null) === bookMatchKey(payload.bookTitle, null),
+    );
+
+  if (!existing) {
+    return createNotionBookPage(bookPayloadFromLog(payload));
+  }
+
+  const incoming = bookPayloadFromLog(payload);
+  const shouldFill =
+    (!existing.author && incoming.author) ||
+    (!existing.publisher && incoming.publisher) ||
+    (!existing.isbn13 && incoming.isbn13) ||
+    ((!existing.totalPages || existing.totalPages <= 0) &&
+      incoming.totalPages &&
+      incoming.totalPages > 0) ||
+    (!existing.genre && incoming.genre) ||
+    (!existing.coverUrl && incoming.coverUrl) ||
+    (!existing.yes24Url && incoming.yes24Url);
+
+  if (!shouldFill) return { id: existing.pageId, url: undefined };
+
+  return updateNotionBookPage(existing.pageId, {
+    title: existing.title,
+    author: existing.author || incoming.author,
+    publisher: existing.publisher || incoming.publisher,
+    isbn13: existing.isbn13 || incoming.isbn13,
+    totalPages:
+      existing.totalPages && existing.totalPages > 0
+        ? existing.totalPages
+        : incoming.totalPages,
+    genre: existing.genre || incoming.genre,
+    coverUrl: existing.coverUrl || incoming.coverUrl,
+    yes24Url: existing.yes24Url || incoming.yes24Url,
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Notion 독서 기록 DB
+ * ------------------------------------------------------------------ */
+
+/** 새 Notion 독서 기록 페이지 생성 */
+export async function createNotionLogPage(payload: NotionLogPayload) {
+  const bookPage = await resolveNotionBook(payload);
+
+  return notionRequest<{ id: string; url?: string }>("/pages", {
+    method: "POST",
+    body: {
+      parent: { type: "data_source_id", data_source_id: NOTION_LOG_DATA_SOURCE_ID },
+      properties: toNotionLogProperties(payload, bookPage.id),
+    },
+  });
+}
+
+/** 기존 Notion 독서 기록 페이지 갱신 */
+export async function updateNotionLogPage(
+  pageId: string,
+  payload: NotionLogPayload,
+) {
+  const bookPage = await resolveNotionBook(payload);
+
+  return notionRequest<{ id: string; url?: string }>("/pages/" + pageId, {
+    method: "PATCH",
+    body: { properties: toNotionLogProperties(payload, bookPage.id) },
+  });
+}
+
+/** Notion 독서 기록 DB의 모든 페이지를 앱 도메인 값으로 변환 */
+export async function listNotionLogRecords(): Promise<{
+  records: NotionLogRecord[];
+  skipped: number;
+}> {
+  const [{ records: books, skipped: bookSkipped }, logQuery] = await Promise.all([
+    listNotionBookRecords(),
+    queryDataSource(NOTION_LOG_DATA_SOURCE_ID),
+  ]);
+
+  const bookByPageId = new Map(books.map((book) => [book.pageId, book]));
+  const records: NotionLogRecord[] = [];
+  let skipped = bookSkipped + logQuery.skipped;
+
+  for (const raw of logQuery.results) {
+    const parsed = parseNotionLogPage(raw);
+    if (!parsed) {
+      skipped += 1;
+      continue;
+    }
+
+    const book = bookByPageId.get(parsed.bookPageId);
+    if (!book) {
+      skipped += 1;
+      continue;
+    }
+
+    records.push({
+      ...parsed,
+      bookTitle: book.title,
+      author: book.author,
+      publisher: book.publisher,
+      isbn13: book.isbn13,
+      genre: book.genre,
+      totalPages: book.totalPages,
+      coverUrl: book.coverUrl,
+      yes24Url: book.yes24Url,
+    });
+  }
+
   return { records, skipped };
 }
 
 /* ------------------------------------------------------------------ *
- * Supabase (서버측, RLS는 anon 정책 그대로 적용)
+ * Supabase (서버측)
  * ------------------------------------------------------------------ */
 
 function serverSupabase() {
@@ -119,7 +300,10 @@ function serverSupabase() {
     global: {
       fetch: (input, init) => {
         const headers = new Headers(init?.headers);
-        if (key.startsWith("sb_") && headers.get("Authorization") === `Bearer ${key}`) {
+        if (
+          key.startsWith("sb_") &&
+          headers.get("Authorization") === "Bearer " + key
+        ) {
           headers.delete("Authorization");
         }
         headers.set("apikey", key);
@@ -129,13 +313,13 @@ function serverSupabase() {
   });
 }
 
-/** 기록에 연결된 Notion 페이지 ID 저장 */
 export async function saveNotionPageId(logId: string, pageId: string) {
   const supabase = serverSupabase();
   const { error } = await supabase
     .from("reading_logs")
     .update({ notion_page_id: pageId })
     .eq("id", logId);
+
   if (error) console.error("notion_page_id 저장 실패", error.message);
 }
 
@@ -151,7 +335,7 @@ export type ImportSummary = {
 type BookRow = Database["public"]["Tables"]["books"]["Row"];
 type LogRow = Database["public"]["Tables"]["reading_logs"]["Row"];
 
-/** Notion → Supabase 가져오기. 실패한 건은 건너뛰고 나머지는 그대로 유지한다. */
+/** Notion → Supabase 가져오기 */
 export async function importNotionLogs(): Promise<ImportSummary> {
   const supabase = serverSupabase();
   const summary: ImportSummary = {
@@ -166,49 +350,62 @@ export async function importNotionLogs(): Promise<ImportSummary> {
   const { records, skipped } = await listNotionLogRecords();
   summary.skipped = skipped;
 
-  const booksRes = await supabase.from("books").select("*");
+  const [booksRes, logsRes] = await Promise.all([
+    supabase.from("books").select("*"),
+    supabase.from("reading_logs").select("*"),
+  ]);
+
   if (booksRes.error) throw new Error("책 목록을 불러오지 못했어요.");
-  const logsRes = await supabase.from("reading_logs").select("*");
   if (logsRes.error) throw new Error("독서 기록을 불러오지 못했어요.");
 
   const books: BookRow[] = booksRes.data ?? [];
   const logs: LogRow[] = logsRes.data ?? [];
 
-  const bookById = new Map(books.map((b) => [b.id, b]));
+  const bookById = new Map(books.map((b) => [b.id, b] as const));
   const bookByKey = new Map<string, BookRow>();
-  for (const b of books) {
-    bookByKey.set(bookMatchKey(b.title, b.author), b);
-    if (!bookByKey.has(bookMatchKey(b.title, null))) {
-      bookByKey.set(bookMatchKey(b.title, null), b);
+
+  for (const book of books) {
+    bookByKey.set(bookMatchKey(book.title, book.author), book);
+    if (!bookByKey.has(bookMatchKey(book.title, null))) {
+      bookByKey.set(bookMatchKey(book.title, null), book);
     }
   }
 
   const logByPageId = new Map<string, LogRow>();
   const logByMatchKey = new Map<string, LogRow>();
-  for (const l of logs) {
-    if (l.notion_page_id) logByPageId.set(l.notion_page_id, l);
-    const book = bookById.get(l.book_id);
+
+  for (const log of logs) {
+    if (log.notion_page_id) logByPageId.set(log.notion_page_id, log);
+
+    const book = bookById.get(log.book_id);
     const key = logMatchKey({
-      readDate: l.read_date,
+      readDate: log.read_date,
       bookTitle: book?.title ?? "",
-      startPage: l.start_page,
-      endPage: l.end_page,
+      startPage: log.start_page,
+      endPage: log.end_page,
     });
-    if (!logByMatchKey.has(key)) logByMatchKey.set(key, l);
+
+    if (!logByMatchKey.has(key)) logByMatchKey.set(key, log);
   }
 
   async function resolveBook(record: NotionLogRecord): Promise<BookRow> {
     const existing =
       bookByKey.get(bookMatchKey(record.bookTitle, record.author)) ??
       bookByKey.get(bookMatchKey(record.bookTitle, null));
+
     if (existing) {
-      // Notion이 알려준 부가 정보만 보완한다 (기존 값은 덮어쓰지 않음).
       const patch: Partial<BookRow> = {};
+
       if (!existing.author && record.author) patch.author = record.author;
+      if (!existing.publisher && record.publisher) patch.publisher = record.publisher;
+      if (!existing.isbn13 && record.isbn13) patch.isbn13 = record.isbn13;
       if (!existing.genre && record.genre) patch.genre = record.genre;
+      if (!existing.cover_image && record.coverUrl) patch.cover_image = record.coverUrl;
+      if (!existing.yes24_url && record.yes24Url) patch.yes24_url = record.yes24Url;
       if (existing.total_pages <= 0 && record.totalPages && record.totalPages > 0) {
         patch.total_pages = record.totalPages;
       }
+
       if (Object.keys(patch).length > 0) {
         const { data } = await supabase
           .from("books")
@@ -216,12 +413,14 @@ export async function importNotionLogs(): Promise<ImportSummary> {
           .eq("id", existing.id)
           .select("*")
           .single();
+
         if (data) {
           bookById.set(data.id, data);
           bookByKey.set(bookMatchKey(data.title, data.author), data);
           return data;
         }
       }
+
       return existing;
     }
 
@@ -232,10 +431,17 @@ export async function importNotionLogs(): Promise<ImportSummary> {
         author: record.author,
         genre: record.genre,
         total_pages: record.totalPages && record.totalPages > 0 ? record.totalPages : 0,
+        cover_image: record.coverUrl,
+        publisher: record.publisher,
+        isbn13: record.isbn13,
+        yes24_url: record.yes24Url,
       })
       .select("*")
       .single();
-    if (error || !data) throw new Error(error?.message ?? "책을 만들지 못했어요.");
+
+    if (error || !data) {
+      throw new Error(error?.message ?? "책을 만들지 못했어요.");
+    }
 
     bookById.set(data.id, data);
     bookByKey.set(bookMatchKey(data.title, data.author), data);
@@ -246,6 +452,7 @@ export async function importNotionLogs(): Promise<ImportSummary> {
   for (const record of records) {
     try {
       const linked = logByPageId.get(record.pageId);
+
       const fields = {
         read_date: record.readDate,
         start_page: record.startPage,
@@ -259,7 +466,9 @@ export async function importNotionLogs(): Promise<ImportSummary> {
           .from("reading_logs")
           .update(fields)
           .eq("id", linked.id);
+
         if (error) throw new Error(error.message);
+
         summary.updated += 1;
         await applyCompleted(supabase, bookById.get(linked.book_id), record);
         continue;
@@ -278,7 +487,9 @@ export async function importNotionLogs(): Promise<ImportSummary> {
           .from("reading_logs")
           .update({ ...fields, notion_page_id: record.pageId })
           .eq("id", candidate.id);
+
         if (error) throw new Error(error.message);
+
         logByPageId.set(record.pageId, candidate);
         summary.matched += 1;
         await applyCompleted(supabase, bookById.get(candidate.book_id), record);
@@ -286,7 +497,6 @@ export async function importNotionLogs(): Promise<ImportSummary> {
       }
 
       if (candidate) {
-        // 이미 다른 Notion 페이지와 연결된 동일 기록 → 중복 생성하지 않는다.
         summary.skipped += 1;
         continue;
       }
@@ -294,10 +504,17 @@ export async function importNotionLogs(): Promise<ImportSummary> {
       const book = await resolveBook(record);
       const { data, error } = await supabase
         .from("reading_logs")
-        .insert({ ...fields, book_id: book.id, notion_page_id: record.pageId })
+        .insert({
+          ...fields,
+          book_id: book.id,
+          notion_page_id: record.pageId,
+        })
         .select("*")
         .single();
-      if (error || !data) throw new Error(error?.message ?? "기록을 만들지 못했어요.");
+
+      if (error || !data) {
+        throw new Error(error?.message ?? "기록을 만들지 못했어요.");
+      }
 
       logByPageId.set(record.pageId, data);
       logByMatchKey.set(key, data);
@@ -314,12 +531,13 @@ export async function importNotionLogs(): Promise<ImportSummary> {
   return summary;
 }
 
-/** Notion 완독 체크가 켜져 있으면 책에 반영 (계산값과 모순되지 않는 범위에서) */
 async function applyCompleted(
   supabase: ReturnType<typeof serverSupabase>,
   book: BookRow | undefined,
   record: NotionLogRecord,
 ) {
-  if (!book || record.completed !== true || book.completed) return;
+  if (!book || book.completed) return;
+  if (!book.total_pages || book.total_pages <= 0 || record.endPage < book.total_pages) return;
+
   await supabase.from("books").update({ completed: true }).eq("id", book.id);
 }

@@ -48,32 +48,32 @@ export const NOTION_GENRE_OPTIONS = [
 
 export type NotionBookPayload = {
   title: string;
-  author?: string | null;
-  publisher?: string | null;
-  isbn13?: string | null;
-  totalPages?: number | null;
-  genre?: string | null;
-  coverUrl?: string | null;
-  yes24Url?: string | null;
+  author?: string | null | undefined;
+  publisher?: string | null | undefined;
+  isbn13?: string | null | undefined;
+  totalPages?: number | null | undefined;
+  genre?: string | null | undefined;
+  coverUrl?: string | null | undefined;
+  yes24Url?: string | null | undefined;
 };
 
 export type NotionLogPayload = {
   bookTitle: string;
-  author?: string | null;
-  publisher?: string | null;
-  isbn13?: string | null;
-  genre?: string | null;
-  totalPages?: number | null;
-  coverUrl?: string | null;
-  yes24Url?: string | null;
+  author?: string | null | undefined;
+  publisher?: string | null | undefined;
+  isbn13?: string | null | undefined;
+  genre?: string | null | undefined;
+  totalPages?: number | null | undefined;
+  coverUrl?: string | null | undefined;
+  yes24Url?: string | null | undefined;
   readDate: string;
   startPage: number;
   endPage: number;
   pagesRead: number;
   currentPage?: number | null;
-  quote?: string | null;
-  thought?: string | null;
-  photoUrl?: string | null;
+  quote?: string | null | undefined;
+  thought?: string | null | undefined;
+  photoUrl?: string | null | undefined;
 };
 
 function richText(value?: string | null) {

@@ -2,7 +2,7 @@
  * 저장소 접근 레이어 (Lovable Cloud / PostgreSQL).
  * UI는 이 파일의 함수만 사용하고, 쿼리 세부사항은 여기 안에 가둔다.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "./db";
 import type {
   Book,
   NewBookInput,

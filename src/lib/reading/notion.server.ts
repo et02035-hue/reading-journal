@@ -108,9 +108,11 @@ export async function listNotionLogRecords(): Promise<{
  * ------------------------------------------------------------------ */
 
 function serverSupabase() {
-  const url = process.env["SUPABASE_URL"];
-  const key = process.env["SUPABASE_PUBLISHABLE_KEY"];
-  if (!url || !key) throw new Error("데이터베이스 설정을 찾지 못했어요.");
+  const url = process.env["SUPABASE_URL"] || "https://izzfqgytbouqrklcqivy.supabase.co";
+  const key =
+    process.env["SUPABASE_PUBLISHABLE_KEY"] ||
+    process.env["SUPABASE_ANON_KEY"] ||
+    "sb_publishable_dYsJaw5GxtBqTLJTGWzwEg_xL_XTg8X";
 
   return createClient<Database>(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },

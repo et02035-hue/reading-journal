@@ -25,34 +25,79 @@ import {
 import { bookMatchKey, logMatchKey } from "./sync-matching";
 
 const NOTION_API_URL = "https://api.notion.com/v1";
+const NOTION_GATEWAY_URL = "https://connector-gateway.lovable.dev/notion/v1";
 
-function notionHeaders() {
-  const notionKey =
+type NotionTransport = {
+  baseUrl: string;
+  headers: Record<string, string>;
+};
+
+function notionTransport(): NotionTransport | null {
+  // 별도의 직접 연동 토큰이 있으면 Notion REST API를 바로 사용한다.
+  const directKey =
+    process.env["NOTION_API_TOKEN"] ||
+    process.env["NOTION_DIRECT_TOKEN"];
+
+  if (directKey) {
+    return {
+      baseUrl: NOTION_API_URL,
+      headers: {
+        Authorization: "Bearer " + directKey,
+        "Notion-Version": "2025-09-03",
+        "Content-Type": "application/json",
+      },
+    };
+  }
+
+  // 기존 배포 환경이 Lovable Gateway용 키만 갖고 있어도 동작하도록 호환한다.
+  // 이 경우 실제 Notion 토큰은 X-Connection-Api-Key로 전달된다.
+  const lovableKey = process.env["LOVABLE_API_KEY"];
+  const connectionKey =
     process.env["NOTION_API_KEY"] ||
     process.env["NOTION_TOKEN"] ||
     process.env["NOTION_INTEGRATION_TOKEN"];
 
-  if (!notionKey) return null;
+  if (lovableKey && connectionKey) {
+    return {
+      baseUrl: NOTION_GATEWAY_URL,
+      headers: {
+        Authorization: "Bearer " + lovableKey,
+        "X-Connection-Api-Key": connectionKey,
+        "Notion-Version": "2025-09-03",
+        "Content-Type": "application/json",
+      },
+    };
+  }
 
-  return {
-    Authorization: "Bearer " + notionKey,
-    "Notion-Version": "2025-09-03",
-    "Content-Type": "application/json",
-  };
+  // 일반 Node/서버 배포에서 NOTION_API_KEY만 직접 넣은 경우도 지원한다.
+  if (connectionKey) {
+    return {
+      baseUrl: NOTION_API_URL,
+      headers: {
+        Authorization: "Bearer " + connectionKey,
+        "Notion-Version": "2025-09-03",
+        "Content-Type": "application/json",
+      },
+    };
+  }
+
+  return null;
 }
 
 async function notionRequest<T>(
   path: string,
   init: { method: string; body?: unknown },
 ): Promise<T> {
-  const headers = notionHeaders();
-  if (!headers) {
-    throw new Error("Notion 연결 키가 설정되지 않았습니다.");
+  const transport = notionTransport();
+  if (!transport) {
+    throw new Error(
+      "Notion 연동 키가 없습니다. 배포 환경에 NOTION_API_TOKEN(직접 연동) 또는 기존 Notion 연결 키를 설정해 주세요.",
+    );
   }
 
-  const response = await fetch(NOTION_API_URL + path, {
+  const response = await fetch(transport.baseUrl + path, {
     method: init.method,
-    headers,
+    headers: transport.headers,
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   });
 

@@ -233,6 +233,8 @@ export type NotionLogRecord = {
   startPage: number;
   endPage: number;
   totalPages: number | null;
+  coverUrl: string | null;
+  yes24Url: string | null;
   quote: string | null;
   thought: string | null;
 };

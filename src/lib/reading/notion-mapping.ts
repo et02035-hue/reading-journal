@@ -296,6 +296,8 @@ export function parseNotionLogPage(
     startPage,
     endPage,
     totalPages: null,
+    coverUrl: null,
+    yes24Url: null,
     quote: richTextValue(props[p.quote]) || null,
     thought: richTextValue(props[p.thought]) || null,
   };

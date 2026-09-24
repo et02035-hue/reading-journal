@@ -120,7 +120,11 @@ export function toNotionBookProperties(book: NotionBookPayload) {
 }
 
 /** 앱의 독서 기록 1건 → Notion 독서 기록 DB properties */
-export function toNotionLogProperties(log: NotionLogPayload, notionBookPageId: string) {
+export function toNotionLogProperties(
+  log: NotionLogPayload,
+  notionBookPageId: string | null,
+  relationProp: string = NOTION_LOG_PROPERTIES.book,
+) {
   const p = NOTION_LOG_PROPERTIES;
 
   const properties: Record<string, unknown> = {
@@ -134,12 +138,15 @@ export function toNotionLogProperties(log: NotionLogPayload, notionBookPageId: s
       ],
     },
     [p.readDate]: { date: { start: log.readDate } },
-    [p.book]: { relation: [{ id: notionBookPageId }] },
     [p.startPage]: { number: log.startPage },
     [p.endPage]: { number: log.endPage },
     [p.quote]: richText(log.quote),
     [p.thought]: richText(log.thought),
   };
+
+  if (notionBookPageId) {
+    properties[relationProp] = { relation: [{ id: notionBookPageId }] };
+  }
 
   // 아래 값들은 Notion에서 수식/롤업으로 계산되므로 앱에서 직접 쓰지 않는다.
   // - 오늘 읽은 쪽수
@@ -262,12 +269,15 @@ export function parseNotionBookPage(page: NotionPage): NotionBookRecord | null {
 }
 
 /** 필수 값(날짜·책 관계·시작/끝 페이지)이 없으면 null */
-export function parseNotionLogPage(page: NotionPage): NotionLogRecord | null {
+export function parseNotionLogPage(
+  page: NotionPage,
+  relationProp: string = NOTION_LOG_PROPERTIES.book,
+): NotionLogRecord | null {
   const p = NOTION_LOG_PROPERTIES;
   const props = (page.properties ?? {}) as NotionProperty;
 
   const readDate = dateOf(props[p.readDate]);
-  const bookPageId = relationIdOf(props[p.book]);
+  const bookPageId = relationIdOf(props[relationProp]);
   const startPage = numberOf(props[p.startPage]);
   const endPage = numberOf(props[p.endPage]);
 

@@ -11,7 +11,10 @@ import type { Database } from "@/integrations/supabase/types";
 
 import {
   NOTION_BOOK_DATA_SOURCE_ID,
+  NOTION_BOOK_PROPERTIES,
+  NOTION_GENRE_OPTIONS,
   NOTION_LOG_DATA_SOURCE_ID,
+  NOTION_LOG_PROPERTIES,
   parseNotionBookPage,
   parseNotionLogPage,
   toNotionBookProperties,
@@ -147,6 +150,105 @@ async function queryDataSource(
   return { results, skipped };
 }
 
+
+/* ------------------------------------------------------------------ *
+ * 책 DB 연결 대상 확인
+ *
+ * 설정된 책 DB가 Lovable Notion 연결에 공유되지 않았으면(404),
+ * 연결이 접근 가능한 「읽는 하루 — 책(앱)」 DB를 찾거나 만들고
+ * 독서 기록 DB에 그 책 DB를 가리키는 관계 속성을 추가한다.
+ * ------------------------------------------------------------------ */
+
+const FALLBACK_BOOK_DB_TITLE = "읽는 하루 — 책(앱)";
+const FALLBACK_RELATION_PROP = "책(앱)";
+
+type BookSetup = { bookDataSourceId: string; relationProp: string };
+let cachedSetup: BookSetup | null = null;
+
+function isNotFound(error: unknown) {
+  return error instanceof Error && error.message.includes("(404)");
+}
+
+async function findFallbackBookDataSource(): Promise<string | null> {
+  const res = await notionRequest<{
+    results?: { id: string; title?: { plain_text?: string }[] }[];
+  }>("/search", {
+    method: "POST",
+    body: {
+      query: FALLBACK_BOOK_DB_TITLE,
+      filter: { property: "object", value: "data_source" },
+      page_size: 20,
+    },
+  });
+  const hit = (res.results ?? []).find(
+    (ds) => (ds.title ?? []).map((t) => t.plain_text ?? "").join("").trim() === FALLBACK_BOOK_DB_TITLE,
+  );
+  return hit?.id ?? null;
+}
+
+async function createFallbackBookDataSource(): Promise<string> {
+  const genreOptions = NOTION_GENRE_OPTIONS.map((name) => ({ name }));
+  const db = await notionRequest<{ data_sources?: { id: string }[] }>("/databases", {
+    method: "POST",
+    body: {
+      parent: { type: "workspace", workspace: true },
+      title: [{ text: { content: FALLBACK_BOOK_DB_TITLE } }],
+      initial_data_source: {
+        properties: {
+          [NOTION_BOOK_PROPERTIES.title]: { title: {} },
+          [NOTION_BOOK_PROPERTIES.author]: { rich_text: {} },
+          [NOTION_BOOK_PROPERTIES.publisher]: { rich_text: {} },
+          [NOTION_BOOK_PROPERTIES.isbn13]: { rich_text: {} },
+          [NOTION_BOOK_PROPERTIES.totalPages]: { number: { format: "number" } },
+          [NOTION_BOOK_PROPERTIES.genre]: { multi_select: { options: genreOptions } },
+          [NOTION_BOOK_PROPERTIES.cover]: { url: {} },
+          [NOTION_BOOK_PROPERTIES.yes24Url]: { url: {} },
+        },
+      },
+    },
+  });
+  const id = db.data_sources?.[0]?.id;
+  if (!id) throw new Error("Notion 책 DB를 만들지 못했습니다.");
+  return id;
+}
+
+async function ensureRelationProperty(bookDataSourceId: string) {
+  const logDs = await notionRequest<{
+    properties?: Record<string, { type?: string; relation?: { data_source_id?: string } }>;
+  }>("/data_sources/" + NOTION_LOG_DATA_SOURCE_ID, { method: "GET" });
+  const existing = logDs.properties?.[FALLBACK_RELATION_PROP];
+  if (existing?.type === "relation" && existing.relation?.data_source_id === bookDataSourceId) return;
+
+  await notionRequest("/data_sources/" + NOTION_LOG_DATA_SOURCE_ID, {
+    method: "PATCH",
+    body: {
+      properties: {
+        [FALLBACK_RELATION_PROP]: {
+          relation: { data_source_id: bookDataSourceId, single_property: {} },
+        },
+      },
+    },
+  });
+}
+
+async function getBookSetup(): Promise<BookSetup> {
+  if (cachedSetup) return cachedSetup;
+
+  try {
+    await notionRequest("/data_sources/" + NOTION_BOOK_DATA_SOURCE_ID, { method: "GET" });
+    cachedSetup = { bookDataSourceId: NOTION_BOOK_DATA_SOURCE_ID, relationProp: NOTION_LOG_PROPERTIES.book };
+    return cachedSetup;
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
+
+  const bookDataSourceId =
+    (await findFallbackBookDataSource()) ?? (await createFallbackBookDataSource());
+  await ensureRelationProperty(bookDataSourceId);
+  cachedSetup = { bookDataSourceId, relationProp: FALLBACK_RELATION_PROP };
+  return cachedSetup;
+}
+
 /* ------------------------------------------------------------------ *
  * Notion 책 DB
  * ------------------------------------------------------------------ */
@@ -155,9 +257,8 @@ export async function listNotionBookRecords(): Promise<{
   records: NotionBookRecord[];
   skipped: number;
 }> {
-  const { results, skipped: initialSkipped } = await queryDataSource(
-    NOTION_BOOK_DATA_SOURCE_ID,
-  );
+  const { bookDataSourceId } = await getBookSetup();
+  const { results, skipped: initialSkipped } = await queryDataSource(bookDataSourceId);
 
   const records: NotionBookRecord[] = [];
   let skipped = initialSkipped;
@@ -172,10 +273,11 @@ export async function listNotionBookRecords(): Promise<{
 }
 
 async function createNotionBookPage(payload: NotionBookPayload) {
+  const { bookDataSourceId } = await getBookSetup();
   return notionRequest<{ id: string; url?: string }>("/pages", {
     method: "POST",
     body: {
-      parent: { type: "data_source_id", data_source_id: NOTION_BOOK_DATA_SOURCE_ID },
+      parent: { type: "data_source_id", data_source_id: bookDataSourceId },
       properties: toNotionBookProperties(payload),
     },
   });
@@ -263,12 +365,13 @@ async function resolveNotionBook(payload: NotionLogPayload) {
 /** 새 Notion 독서 기록 페이지 생성 */
 export async function createNotionLogPage(payload: NotionLogPayload) {
   const bookPage = await resolveNotionBook(payload);
+  const { relationProp } = await getBookSetup();
 
   return notionRequest<{ id: string; url?: string }>("/pages", {
     method: "POST",
     body: {
       parent: { type: "data_source_id", data_source_id: NOTION_LOG_DATA_SOURCE_ID },
-      properties: toNotionLogProperties(payload, bookPage.id),
+      properties: toNotionLogProperties(payload, bookPage.id, relationProp),
     },
   });
 }
@@ -279,10 +382,11 @@ export async function updateNotionLogPage(
   payload: NotionLogPayload,
 ) {
   const bookPage = await resolveNotionBook(payload);
+  const { relationProp } = await getBookSetup();
 
   return notionRequest<{ id: string; url?: string }>("/pages/" + pageId, {
     method: "PATCH",
-    body: { properties: toNotionLogProperties(payload, bookPage.id) },
+    body: { properties: toNotionLogProperties(payload, bookPage.id, relationProp) },
   });
 }
 
@@ -291,6 +395,7 @@ export async function listNotionLogRecords(): Promise<{
   records: NotionLogRecord[];
   skipped: number;
 }> {
+  const { relationProp } = await getBookSetup();
   const [{ records: books, skipped: bookSkipped }, logQuery] = await Promise.all([
     listNotionBookRecords(),
     queryDataSource(NOTION_LOG_DATA_SOURCE_ID),
@@ -301,7 +406,7 @@ export async function listNotionLogRecords(): Promise<{
   let skipped = bookSkipped + logQuery.skipped;
 
   for (const raw of logQuery.results) {
-    const parsed = parseNotionLogPage(raw);
+    const parsed = parseNotionLogPage(raw, relationProp);
     if (!parsed) {
       skipped += 1;
       continue;

@@ -48,32 +48,32 @@ export const NOTION_GENRE_OPTIONS = [
 
 export type NotionBookPayload = {
   title: string;
-  author?: string | null;
-  publisher?: string | null;
-  isbn13?: string | null;
-  totalPages?: number | null;
-  genre?: string | null;
-  coverUrl?: string | null;
-  yes24Url?: string | null;
+  author?: string | null | undefined;
+  publisher?: string | null | undefined;
+  isbn13?: string | null | undefined;
+  totalPages?: number | null | undefined;
+  genre?: string | null | undefined;
+  coverUrl?: string | null | undefined;
+  yes24Url?: string | null | undefined;
 };
 
 export type NotionLogPayload = {
   bookTitle: string;
-  author?: string | null;
-  publisher?: string | null;
-  isbn13?: string | null;
-  genre?: string | null;
-  totalPages?: number | null;
-  coverUrl?: string | null;
-  yes24Url?: string | null;
+  author?: string | null | undefined;
+  publisher?: string | null | undefined;
+  isbn13?: string | null | undefined;
+  genre?: string | null | undefined;
+  totalPages?: number | null | undefined;
+  coverUrl?: string | null | undefined;
+  yes24Url?: string | null | undefined;
   readDate: string;
   startPage: number;
   endPage: number;
   pagesRead: number;
   currentPage?: number | null;
-  quote?: string | null;
-  thought?: string | null;
-  photoUrl?: string | null;
+  quote?: string | null | undefined;
+  thought?: string | null | undefined;
+  photoUrl?: string | null | undefined;
 };
 
 function richText(value?: string | null) {
@@ -120,7 +120,11 @@ export function toNotionBookProperties(book: NotionBookPayload) {
 }
 
 /** 앱의 독서 기록 1건 → Notion 독서 기록 DB properties */
-export function toNotionLogProperties(log: NotionLogPayload, notionBookPageId: string) {
+export function toNotionLogProperties(
+  log: NotionLogPayload,
+  notionBookPageId: string | null,
+  relationProp: string = NOTION_LOG_PROPERTIES.book,
+) {
   const p = NOTION_LOG_PROPERTIES;
 
   const properties: Record<string, unknown> = {
@@ -134,12 +138,15 @@ export function toNotionLogProperties(log: NotionLogPayload, notionBookPageId: s
       ],
     },
     [p.readDate]: { date: { start: log.readDate } },
-    [p.book]: { relation: [{ id: notionBookPageId }] },
     [p.startPage]: { number: log.startPage },
     [p.endPage]: { number: log.endPage },
     [p.quote]: richText(log.quote),
     [p.thought]: richText(log.thought),
   };
+
+  if (notionBookPageId) {
+    properties[relationProp] = { relation: [{ id: notionBookPageId }] };
+  }
 
   // 아래 값들은 Notion에서 수식/롤업으로 계산되므로 앱에서 직접 쓰지 않는다.
   // - 오늘 읽은 쪽수
@@ -262,12 +269,15 @@ export function parseNotionBookPage(page: NotionPage): NotionBookRecord | null {
 }
 
 /** 필수 값(날짜·책 관계·시작/끝 페이지)이 없으면 null */
-export function parseNotionLogPage(page: NotionPage): NotionLogRecord | null {
+export function parseNotionLogPage(
+  page: NotionPage,
+  relationProp: string = NOTION_LOG_PROPERTIES.book,
+): NotionLogRecord | null {
   const p = NOTION_LOG_PROPERTIES;
   const props = (page.properties ?? {}) as NotionProperty;
 
   const readDate = dateOf(props[p.readDate]);
-  const bookPageId = relationIdOf(props[p.book]);
+  const bookPageId = relationIdOf(props[relationProp]);
   const startPage = numberOf(props[p.startPage]);
   const endPage = numberOf(props[p.endPage]);
 
@@ -286,6 +296,8 @@ export function parseNotionLogPage(page: NotionPage): NotionLogRecord | null {
     startPage,
     endPage,
     totalPages: null,
+    coverUrl: null,
+    yes24Url: null,
     quote: richTextValue(props[p.quote]) || null,
     thought: richTextValue(props[p.thought]) || null,
   };

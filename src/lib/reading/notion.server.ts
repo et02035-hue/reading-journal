@@ -691,3 +691,112 @@ async function applyCompleted(
 
   await supabase.from("books").update({ completed: true }).eq("id", book.id);
 }
+
+/* ------------------------------------------------------------------ *
+ * 미동기화 기록 일괄 전송 (앱 → Notion)
+ * ------------------------------------------------------------------ */
+
+export type PendingSyncItem = {
+  logId: string;
+  label: string;
+  ok: boolean;
+  pageId?: string | undefined;
+  error?: string | undefined;
+};
+
+export type PendingSyncSummary = {
+  total: number;
+  synced: number;
+  failed: number;
+  results: PendingSyncItem[];
+};
+
+/** notion_page_id가 비어 있는 기록만 Notion에 새로 만들고 page id를 저장한다. */
+export async function syncPendingLogs(): Promise<PendingSyncSummary> {
+  const supabase = serverSupabase();
+  const { data, error } = await supabase
+    .from("reading_logs")
+    .select(
+      "id, read_date, start_page, end_page, pages_read, quote, thought, page_image_url, book:books(title, author, publisher, isbn13, genre, total_pages, current_page, cover_image, yes24_url)",
+    )
+    .is("notion_page_id", null)
+    .order("read_date", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw new Error("동기화할 기록을 불러오지 못했어요: " + error.message);
+
+  const results: PendingSyncItem[] = [];
+  for (const log of data ?? []) {
+    const book = (log as unknown as { book: Record<string, unknown> | null }).book;
+    const title = (book?.["title"] as string | undefined) ?? "";
+    const label = `${log.read_date} · ${title || "책 없음"} ${log.start_page}–${log.end_page}p`;
+    try {
+      if (!book) throw new Error("연결된 책이 없어요.");
+
+      // 직전에 다른 요청이 연결했는지 다시 확인 (중복 페이지 방지)
+      const { data: fresh } = await supabase
+        .from("reading_logs")
+        .select("notion_page_id")
+        .eq("id", log.id)
+        .maybeSingle();
+      if (fresh?.notion_page_id) {
+        results.push({ logId: log.id, label, ok: true, pageId: fresh.notion_page_id });
+        continue;
+      }
+
+      let photoUrl: string | null = null;
+      const path = log.page_image_url;
+      if (path) {
+        if (path.startsWith("http")) photoUrl = path;
+        else {
+          const signed = await supabase.storage
+            .from("page-photos")
+            .createSignedUrl(path, 60 * 60 * 24 * 7);
+          photoUrl = signed.data?.signedUrl ?? null;
+        }
+      }
+
+      const payload: NotionLogPayload = {
+        bookTitle: title,
+        author: book["author"] as string | null,
+        publisher: book["publisher"] as string | null,
+        isbn13: book["isbn13"] as string | null,
+        genre: book["genre"] as string | null,
+        totalPages: book["total_pages"] as number | null,
+        coverUrl: book["cover_image"] as string | null,
+        yes24Url: book["yes24_url"] as string | null,
+        readDate: log.read_date,
+        startPage: log.start_page,
+        endPage: log.end_page,
+        pagesRead: log.pages_read ?? Math.max(0, log.end_page - log.start_page + 1),
+        currentPage: book["current_page"] as number | null,
+        quote: log.quote,
+        thought: log.thought,
+        photoUrl,
+      };
+
+      const page = await createNotionLogPage(payload);
+      const { error: saveError } = await supabase
+        .from("reading_logs")
+        .update({ notion_page_id: page.id })
+        .eq("id", log.id)
+        .is("notion_page_id", null);
+      if (saveError) {
+        throw new Error(
+          `Notion 페이지는 만들었지만 연결 저장에 실패했어요 (${page.id}): ${saveError.message}`,
+        );
+      }
+      results.push({ logId: log.id, label, ok: true, pageId: page.id });
+    } catch (e) {
+      console.error("pending Notion sync failed", log.id, e);
+      results.push({
+        logId: log.id,
+        label,
+        ok: false,
+        error: e instanceof Error ? e.message : "Notion에 보내지 못했어요.",
+      });
+    }
+  }
+
+  const synced = results.filter((r) => r.ok).length;
+  return { total: results.length, synced, failed: results.length - synced, results };
+}

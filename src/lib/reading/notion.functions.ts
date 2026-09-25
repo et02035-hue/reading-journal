@@ -49,3 +49,8 @@ export const importLogsFromNotion = createServerFn({ method: "POST" }).handler(a
   const { importNotionLogs } = await import("./notion.server");
   return importNotionLogs();
 });
+
+export const syncPendingLogsToNotion = createServerFn({ method: "POST" }).handler(async () => {
+  const { syncPendingLogs } = await import("./notion.server");
+  return syncPendingLogs();
+});

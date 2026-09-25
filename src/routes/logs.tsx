@@ -1,11 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { Images, Trash2 } from "lucide-react";
+import { Images, Trash2, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 
 import { AppShell } from "@/components/AppShell";
 import { EmptyState } from "@/components/EmptyState";
-import { deleteLog, getPhotoUrls } from "@/lib/reading/api";
+import { countUnsyncedLogs, deleteLog, getPhotoUrls } from "@/lib/reading/api";
+import { syncPendingLogsToNotion } from "@/lib/reading/notion.functions";
+import { useServerFn } from "@tanstack/react-start";
+import { useState } from "react";
 import { formatKoreanDate } from "@/lib/reading/format";
 import { logsQuery } from "@/lib/reading/queries";
 import type { ReadingLogWithBook } from "@/lib/reading/types";
@@ -48,10 +51,50 @@ function LogsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const unsynced = useQuery({ queryKey: ["unsynced-count"], queryFn: countUnsyncedLogs });
+  const syncPending = useServerFn(syncPendingLogsToNotion);
+  const [failures, setFailures] = useState<{ label: string; error?: string | undefined }[]>([]);
+  const sendPending = useMutation({
+    mutationFn: () => syncPending(),
+    onSuccess: async (r) => {
+      await queryClient.invalidateQueries();
+      const failed = r.results.filter((x) => !x.ok);
+      setFailures(failed.map((x) => ({ label: x.label, error: x.error })));
+      if (failed.length === 0) toast.success(`Notion에 ${r.synced}건을 보냈어요.`);
+      else toast.error(`성공 ${r.synced}건 · 실패 ${failed.length}건. 다시 시도할 수 있어요.`);
+    },
+    onError: (e: Error) => toast.error(`Notion에 보내지 못했어요: ${e.message}`),
+  });
+
   const grouped = groupByDate(logs.data ?? []);
 
   return (
     <AppShell title="기록 모아보기" subtitle="날짜별로 쌓인 나의 독서">
+      {(unsynced.data ?? 0) > 0 || failures.length > 0 ? (
+        <div className="card-soft mb-6 px-5 py-4">
+          <p className="text-sm font-semibold">
+            Notion에 아직 보내지 않은 기록 {unsynced.data ?? 0}건
+          </p>
+          <button
+            type="button"
+            disabled={sendPending.isPending || (unsynced.data ?? 0) === 0}
+            onClick={() => sendPending.mutate()}
+            className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+          >
+            <UploadCloud className="size-4" />
+            {sendPending.isPending ? "보내는 중…" : "Notion에 보내기"}
+          </button>
+          {failures.length > 0 ? (
+            <ul className="mt-3 space-y-1 text-xs text-destructive">
+              {failures.map((f, i) => (
+                <li key={i}>
+                  {f.label}: {f.error}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       {logs.isLoading ? (
         <div className="space-y-3">
           {[0, 1, 2].map((i) => (

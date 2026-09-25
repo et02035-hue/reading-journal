@@ -167,3 +167,13 @@ export async function getTodayPages(): Promise<number> {
   ) as { pages_read: number }[];
   return logs.reduce((sum, l) => sum + (l.pages_read ?? 0), 0);
 }
+
+/** Notion에 아직 연결되지 않은 기록 수 */
+export async function countUnsyncedLogs(): Promise<number> {
+  const { count, error } = await supabase
+    .from("reading_logs")
+    .select("id", { count: "exact", head: true })
+    .is("notion_page_id", null);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
